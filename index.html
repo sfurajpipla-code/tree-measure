@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tree Pro: Meter Offset</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#000000">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <style>
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; position: fixed; font-family: 'Courier New', monospace; }
+        #camera-view { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+        #ui-top { position: absolute; top: 0; left: 0; width: 100%; background: rgba(0,0,0,0.85); z-index: 10; padding: 10px; border-bottom: 2px solid #00ff00; }
+        #ui-bottom { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.85); z-index: 10; padding: 15px 0; border-top: 2px solid #00ff00; }
+        .config-row { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 5px; }
+        #eyeH { background: #111; border: 1px solid #00ff00; color: #00ff00; width: 55px; text-align: center; padding: 3px; }
+        .toggle-container { margin-bottom: 10px; display: flex; justify-content: center; gap: 5px; }
+        .mode-btn { padding: 5px 10px; font-size: 0.7rem; border: 1px solid #00ff00; color: #00ff00; background: transparent; cursor: pointer; }
+        .mode-active { background: #00ff00; color: #000; }
+        #target-circle { position: absolute; top: 50%; left: 50%; width: 70px; height: 70px; border: 2px solid rgba(255, 0, 0, 0.6); border-radius: 50%; transform: translate(-50%, -50%); z-index: 5; }
+        #bubble { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; background: rgba(0, 255, 0, 0.7); border-radius: 50%; transform: translate(-50%, -50%); z-index: 6; box-shadow: 0 0 10px #00ff00; }
+        #survey-cross { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; z-index: 7; pointer-events: none; }
+        #survey-cross::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 1.5px; background: #00ff00; }
+        #survey-cross::after { content: ''; position: absolute; left: 50%; top: 0; width: 1.5px; height: 100%; background: #00ff00; }
+        .data-val { font-size: 2rem; font-weight: bold; color: #00ff00; }
+        .label { font-size: 0.65rem; color: #008800; }
+        .locked-text { color: #ffc107 !important; }
+        button { padding: 12px 15px; border: 1px solid #00ff00; background: transparent; color: #00ff00; font-weight: bold; border-radius: 4px; min-width: 130px; }
+        .btn-record { background: #004400; color: white; }
+        #portrait-warn { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; color: #ffc107; z-index: 999; justify-content: center; align-items: center; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div id="portrait-warn"><h1>PORTRAIT MODE ONLY</h1></div>
+    <video id="camera-view" autoplay playsinline></video>
+    
+    <div id="ui-top">
+        <div class="toggle-container">
+            <button id="modeNormal" class="mode-btn mode-active" onclick="setMode('normal')">NORMAL</button>
+            <button id="modeTwoStep" class="mode-btn" onclick="setMode('twostep')">TWO-STEP (SLOPE)</button>
+        </div>
+        <div class="config-row">
+            <label style="color:#00ff00; font-size:0.6rem;">EYE H:</label>
+            <input type="number" id="eyeH" value="1.60" step="0.01">
+            <span id="slopeDisp" style="color:#ffc107; font-size:0.6rem; margin-left:10px; display:none;">OFFSET: <span id="vOffsetVal">0.00</span>m</span>
+        </div>
+        <div style="display:flex; justify-content: space-around;">
+            <div><span class="label">DISTANCE</span><br><span id="distRes" class="data-val">0.00</span></div>
+            <div><span class="label">TREE HEIGHT</span><br><span id="heightRes" class="data-val">0.00</span></div>
+        </div>
+    </div>
+
+    <div id="target-circle"></div>
+    <div id="bubble"></div>
+    <div id="survey-cross"></div>
+
+    <div id="ui-bottom">
+        <div id="instruction" style="margin-bottom:12px; color: #00ff00; font-weight:bold; font-size:0.8rem;">1. LEVEL TO HORIZON</div>
+        <div style="display:flex; justify-content: center; gap: 10px;">
+            <button id="mainBtn" onclick="handleMainAction()">START SCAN</button>
+            <button onclick="resetApp()">RESET</button>
+        </div>
+        <div style="font-size: 0.6rem; margin-top:10px; opacity:0.4;">PITCH: <span id="pDeg">0</span>° | MODE: <span id="sMode">NORMAL</span></div>
+    </div>
+
+    <script>
+        let eyeLevelPitch = null;
+        let lockedDist = null;
+        let step = 0; 
+        let currentP = 0;
+        let mode = 'normal';
+
+        function setMode(m) {
+            mode = m;
+            document.getElementById('modeNormal').className = m === 'normal' ? 'mode-btn mode-active' : 'mode-btn';
+            document.getElementById('modeTwoStep').className = m === 'twostep' ? 'mode-btn mode-active' : 'mode-btn';
+            document.getElementById('sMode').innerText = m.toUpperCase();
+            document.getElementById('slopeDisp').style.display = m === 'twostep' ? 'inline' : 'none';
+            resetApp();
+        }
+
+        async function initCamera() {
+            if (step > 0) return;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                document.getElementById('camera-view').srcObject = stream;
+                window.addEventListener('deviceorientation', handleMotion);
+                step = 1;
+                document.getElementById('mainBtn').innerText = "CALIBRATING...";
+            } catch (e) { alert("Camera Error"); }
+        }
+
+        function handleMainAction() {
+            const btn = document.getElementById('mainBtn');
+            const ins = document.getElementById('instruction');
+
+            if (step === 0) initCamera();
+            else if (step === 1.5) { 
+                // Calculate Vertical Offset in Meters
+                const userH = parseFloat(document.getElementById('eyeH').value);
+                const rad = (currentP - eyeLevelPitch) * (Math.PI / 180);
+                
+                // This calculates the vertical drop/rise from eye level relative to the user height
+                // Logic: d = userH / tan(angle_base). Offset = (d * tan(current_angle)) - userH
+                // For simplicity at this stage, we display the relative vertical difference
+                let distAtBase = userH / Math.tan(Math.abs((currentP - eyeLevelPitch) * (Math.PI / 180)));
+                let verticalDiff = (rad > 0) ? "Higher" : (userH * (Math.sin(rad) / Math.cos(rad)));
+                
+                document.getElementById('vOffsetVal').innerText = verticalDiff.toFixed(2);
+                
+                step = 2;
+                btn.innerText = "LOCK DISTANCE";
+                ins.innerText = "2. AIM AT TREE BASE";
+            } else if (step === 2) {
+                lockedDist = parseFloat(document.getElementById('distRes').innerText);
+                document.getElementById('distRes').classList.add('locked-text');
+                step = 3;
+                btn.innerText = "FINISH";
+                ins.innerText = "3. AIM AT TREE TOP";
+            } else if (step === 3) {
+                step = 4;
+                btn.innerText = "LOCKED";
+                document.getElementById('heightRes').classList.add('locked-text');
+                ins.innerText = "MEASUREMENT COMPLETE";
+            }
+        }
+
+        function handleMotion(e) {
+            if (step === 4 || step === 0) return;
+            currentP = e.beta;
+            document.getElementById('pDeg').innerText = currentP.toFixed(1);
+
+            if (step === 1) {
+                let currentR = e.gamma;
+                document.getElementById('bubble').style.transform = `translate(calc(-50% + ${currentR*10}px), calc(-50% + ${(currentP-90)*10}px))`;
+
+                if (Math.abs(currentR) < 0.5 && Math.abs(currentP - 90) < 0.5) {
+                    if(navigator.vibrate) navigator.vibrate(200);
+                    eyeLevelPitch = currentP;
+                    document.getElementById('bubble').style.display = "none";
+                    document.getElementById('target-circle').style.display = "none";
+                    document.getElementById('survey-cross').style.display = "block";
+                    
+                    if(mode === 'twostep') {
+                        step = 1.5;
+                        document.getElementById('mainBtn').innerText = "LOCK SLOPE";
+                        document.getElementById('instruction').innerText = "1.5 AIM AT BASE LEVEL";
+                    } else {
+                        step = 2;
+                        document.getElementById('mainBtn').innerText = "LOCK DISTANCE";
+                        document.getElementById('instruction').innerText = "2. AIM AT TREE BASE";
+                    }
+                    document.getElementById('mainBtn').classList.add('btn-record');
+                }
+            } else {
+                calculate();
+            }
+        }
+
+        function calculate() {
+            const userH = parseFloat(document.getElementById('eyeH').value);
+            const radFromHorizon = (currentP - eyeLevelPitch) * (Math.PI / 180);
+
+            if (step === 2 || step === 1.5) {
+                if (currentP < eyeLevelPitch) {
+                    let d = userH / Math.tan(Math.abs(radFromHorizon));
+                    document.getElementById('distRes').innerText = d.toFixed(2);
+                }
+            } else if (step === 3) {
+                let hUpper = lockedDist * Math.tan(radFromHorizon);
+                let totalH = hUpper + userH;
+                document.getElementById('heightRes').innerText = Math.max(0, totalH).toFixed(2);
+            }
+        }
+
+        function resetApp() {
+            eyeLevelPitch = null; lockedDist = null;
+            step = (document.getElementById('camera-view').srcObject) ? 1 : 0;
+            document.getElementById('bubble').style.display = "block";
+            document.getElementById('target-circle').style.display = "block";
+            document.getElementById('survey-cross').style.display = "none";
+            document.querySelectorAll('.data-val').forEach(el => {
+                el.innerText = "0.00";
+                el.classList.remove('locked-text');
+            });
+            document.getElementById('vOffsetVal').innerText = "0.00";
+            document.getElementById('mainBtn').innerText = step === 1 ? "CALIBRATING..." : "START SCAN";
+            document.getElementById('mainBtn').classList.remove('btn-record');
+            document.getElementById('instruction').innerText = "1. LEVEL TO HORIZON";
+        }
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('SW registered with scope:', registration.scope);
+                    })
+                    .catch(err => {
+                        console.error('SW registration failed:', err);
+                    });
+            });
+        }
+    </script>
+</body>
+</html>
