@@ -1,4 +1,4 @@
-const CACHE_NAME = 'treepro-v1';
+const CACHE_NAME = 'treepro-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -32,4 +32,5 @@ self.addEventListener('fetch', (event) => {
       return response || fetch(event.request);
     })
   );
+
 });
