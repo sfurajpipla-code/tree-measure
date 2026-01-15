@@ -1,6 +1,6 @@
 {
   "name": "Tree Pro: @YB",
-  "short_name": "Tree Pro",
+  "short_name": "Tree Pro@YB",
   "description": "Professional tree height and distance measurement tool with slope offset.",
   "start_url": "./index.html",
   "display": "standalone",
@@ -27,3 +27,4 @@
   ]
 
 }
+
