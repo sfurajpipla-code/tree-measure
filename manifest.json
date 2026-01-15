@@ -1,5 +1,5 @@
 {
-  "name": "Tree Pro: Meter Offset",
+  "name": "Tree Pro: @YB",
   "short_name": "Tree Pro",
   "description": "Professional tree height and distance measurement tool with slope offset.",
   "start_url": "./index.html",
@@ -25,4 +25,5 @@
       "purpose": "maskable"
     }
   ]
+
 }
